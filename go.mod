@@ -25,7 +25,8 @@ require (
 	github.com/sergeymakinen/go-ico v1.0.0-beta.0 // indirect
 	github.com/sqweek/dialog v0.0.0-20240226140203-065105509627 // indirect
 	github.com/tadvi/systray v0.0.0-20190226123456-11a2b8fa57af // indirect
+	golang.org/x/image v0.33.0 // indirect
 	golang.org/x/net v0.35.0 // indirect
 	golang.org/x/sys v0.38.0 // indirect
-	golang.org/x/text v0.22.0 // indirect
+	golang.org/x/text v0.31.0 // indirect
 )

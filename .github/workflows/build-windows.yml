@@ -1,0 +1,49 @@
+name: Build Windows GUI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    name: Build Windows (amd64)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.25.x'
+
+      - name: Cache Go modules and build cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}\go-build
+            ${{ env.GOMODCACHE }}
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Print Go environment
+        run: go env
+
+      - name: Build Windows GUI executable
+        env:
+          GOOS: windows
+          GOARCH: amd64
+        run: |
+          New-Item -ItemType Directory -Path release -Force | Out-Null
+          go build -ldflags "-H=windowsgui" -o release/discordproxy-windows-amd64.exe main.go
+
+      - name: Upload built exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: discordproxy-windows-amd64
+          path: release/discordproxy-windows-amd64.exe

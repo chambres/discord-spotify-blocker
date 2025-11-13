@@ -4,15 +4,21 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
+	_ "embed"
 	"encoding/base64"
+	"image"
+	"image/png"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"syscall"
 	"time"
@@ -25,6 +31,8 @@ import (
 
 	"github.com/elazarl/goproxy"
 	"github.com/getlantern/systray"
+	ico "github.com/sergeymakinen/go-ico"
+	xdraw "golang.org/x/image/draw"
 )
 
 const proxyAddress = "127.0.0.1:8880"
@@ -83,6 +91,9 @@ func mustLoadCA() tls.Certificate {
 }
 
 const iconBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgYAAAAAMAASsJTYQAAAAASUVORK5CYII="
+
+//go:embed spotify-xxl.png
+var embeddedIconPNG []byte
 
 // showMessageBox displays a blocking modal message box using PowerShell MessageBox.
 // This avoids unsafe code while ensuring a modal dialog on Windows.
@@ -282,13 +293,64 @@ func startProxy() {
 	systray.Run(func() {
 		// onReady
 		// set icon (decode tiny PNG) and show status
-		if data, err := base64.StdEncoding.DecodeString(iconBase64); err == nil {
-			// Avoid setting a PNG icon on Windows because systray expects ICO on Windows
-			// and passing PNG there can cause spurious errors in the systray internals.
+		// Prefer embedded icon first; fall back to a spotify-xxl.png file on disk if present.
+		var pngData []byte
+		if len(embeddedIconPNG) > 0 {
+			pngData = embeddedIconPNG
+		} else {
+			if data, err := os.ReadFile(filepath.Join(".", "spotify-xxl.png")); err == nil {
+				pngData = data
+			}
+		}
+
+		if pngData != nil {
 			if runtime.GOOS == "windows" {
-				log.Println("skipping SetIcon on Windows (embedded icon is PNG); provide an ICO if you want an icon")
+				// Decode PNG from embedded bytes and convert/resize -> ICO
+				r := bytes.NewReader(pngData)
+				img, err := png.Decode(r)
+				if err != nil {
+					log.Printf("failed to decode embedded PNG icon: %v", err)
+				} else {
+					// Resize/pad image into a 256x256 RGBA to satisfy ICO encoders.
+					srcBounds := img.Bounds()
+					srcW := srcBounds.Dx()
+					srcH := srcBounds.Dy()
+					const iconSize = 256
+
+					// Calculate scaled size preserving aspect ratio.
+					scale := math.Min(float64(iconSize)/float64(srcW), float64(iconSize)/float64(srcH))
+					newW := int(math.Round(float64(srcW) * scale))
+					newH := int(math.Round(float64(srcH) * scale))
+
+					dst := image.NewNRGBA(image.Rect(0, 0, iconSize, iconSize))
+
+					// Compute destination rectangle to center the image
+					offX := (iconSize - newW) / 2
+					offY := (iconSize - newH) / 2
+					dr := image.Rect(offX, offY, offX+newW, offY+newH)
+
+					// Scale into dst using high-quality interpolator
+					xdraw.CatmullRom.Scale(dst, dr, img, srcBounds, xdraw.Over, nil)
+
+					var buf bytes.Buffer
+					if err := ico.Encode(&buf, dst); err != nil {
+						log.Printf("failed to encode ICO: %v", err)
+					} else {
+						systray.SetIcon(buf.Bytes())
+					}
+				}
 			} else {
-				systray.SetIcon(data)
+				// Non-Windows: use the PNG bytes directly
+				systray.SetIcon(pngData)
+			}
+		} else {
+			// Fallback to embedded tiny icon for platforms that don't have spotify-xxl.png
+			if data, err := base64.StdEncoding.DecodeString(iconBase64); err == nil {
+				if runtime.GOOS == "windows" {
+					log.Println("no spotify-xxl.png found; skipping Windows SetIcon (provide an ICO for a proper icon)")
+				} else {
+					systray.SetIcon(data)
+				}
 			}
 		}
 		systray.SetTooltip("Proxy on")
