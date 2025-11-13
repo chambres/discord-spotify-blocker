@@ -48,3 +48,25 @@ jobs:
         with:
           name: discordproxy-windows-amd64
           path: release/discordproxy-windows-amd64.exe
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: release-${{ github.run_number }}-windows-amd64
+          release_name: discordproxy-${{ github.run_number }}-windows-amd64
+          body: "Automated release for Windows build ${{ github.run_number }}"
+          draft: false
+          prerelease: false
+
+      - name: Upload release asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: release/discordproxy-windows-amd64.exe
+          asset_name: discordproxy-windows-amd64.exe
+          asset_content_type: application/octet-stream
