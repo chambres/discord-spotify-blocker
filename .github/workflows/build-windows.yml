@@ -40,7 +40,8 @@ jobs:
           GOARCH: amd64
         run: |
           New-Item -ItemType Directory -Path release -Force | Out-Null
-          go build -ldflags "-H=windowsgui" -o release/discordproxy-windows-amd64.exe main.go
+          # Build the package (.) so files tagged for windows (main_windows.go) are included.
+          go build -ldflags "-H=windowsgui" -o release/discordproxy-windows-amd64.exe .
 
       - name: Upload built exe
         uses: actions/upload-artifact@v4
