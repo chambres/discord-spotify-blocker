@@ -1,0 +1,4 @@
+# Binaries and keys
+*.exe
+*.pem
+*.key
