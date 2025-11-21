@@ -108,6 +108,19 @@ func showMessageBox(title, message string) {
 	}
 }
 
+// isAdmin checks whether the current process is running with administrator privileges.
+// It uses PowerShell to evaluate the WindowsPrincipal role because it avoids unsafe/syscalls.
+func isAdmin() (bool, error) {
+	psCmd := "([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)"
+	cmd := exec.Command("powershell", "-NoProfile", "-Command", psCmd)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return false, fmt.Errorf("admin check failed: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	s := strings.TrimSpace(strings.ToLower(string(out)))
+	return s == "true", nil
+}
+
 func install_cert() error {
 	// certutil -addstore -f Root ca.pem
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -180,6 +193,19 @@ func startProxy() {
 		return
 	}
 
+	// Ensure we are running as administrator; if not, show modal and exit.
+	if ok, err := isAdmin(); err != nil {
+		msg := fmt.Sprintf("failed to check administrator privileges: %v", err)
+		log.Print(msg)
+		showMessageBox("Proxy setup error", msg)
+		return
+	} else if !ok {
+		msg := "This program must be run as Administrator. Please run as administrator and try again."
+		log.Print(msg)
+		showMessageBox("Administrator required", msg)
+		return
+	}
+
 	// Ensure CA exists (generate if missing)
 	if _, err := os.Stat("ca.pem"); os.IsNotExist(err) {
 		log.Println("ca.pem not found — generating CA files")
@@ -226,23 +252,85 @@ func startProxy() {
 	proxy.OnRequest().HandleConnect(goproxy.AlwaysMitm)
 
 	//regedit for proxy on
-	if err := enable_proxy_with_regedit(); err != nil {
-		log.Printf("failed to enable proxy via regedit: %v", err)
+	// if err := enable_proxy_with_regedit(); err != nil {
+	// 	log.Printf("failed to enable proxy via regedit: %v", err)
 
-		disable_proxy_with_regedit()
-		return
+	// 	disable_proxy_with_regedit()
+	// 	return
 
+	// } else {
+	// 	log.Println("system proxy enabled (" + proxyAddress + ")")
+	// }
+
+	//launch discord.exe with --proxy-server=127.0.0.1:7890 --ignore-certificate-errors
+	// Try to find and launch Discord with custom flags to force it to use our proxy
+	findDiscord := func() (string, error) {
+		// Common install locations/patterns
+		var candidates []string
+		local := os.Getenv("LOCALAPPDATA")
+		if local != "" {
+			candidates = append(candidates,
+				filepath.Join(local, "Discord", "app-*", "Discord.exe"),
+				filepath.Join(local, "Programs", "Discord", "Discord.exe"),
+			)
+		}
+		if pf := os.Getenv("PROGRAMFILES"); pf != "" {
+			candidates = append(candidates, filepath.Join(pf, "Discord", "Discord.exe"))
+		}
+		if pfx := os.Getenv("PROGRAMFILES(X86)"); pfx != "" {
+			candidates = append(candidates, filepath.Join(pfx, "Discord", "Discord.exe"))
+		}
+		// Try to glob the patterns and return the first existing file
+		for _, pat := range candidates {
+			matches, _ := filepath.Glob(pat)
+			for _, m := range matches {
+				if info, err := os.Stat(m); err == nil && !info.IsDir() {
+					return m, nil
+				}
+			}
+		}
+		// fallback to just "Discord.exe" in PATH
+		if p, err := exec.LookPath("Discord.exe"); err == nil {
+			return p, nil
+		}
+		return "", fmt.Errorf("discord executable not found")
+	}
+
+	var discordCmd *exec.Cmd
+
+	if path, err := findDiscord(); err != nil {
+		log.Printf("could not find Discord to launch: %v", err)
 	} else {
-		log.Println("system proxy enabled (" + proxyAddress + ")")
+		args := []string{
+			"--proxy-server=127.0.0.1:8880",
+			"--ignore-certificate-errors",
+		}
+		cmd := exec.Command(path, args...)
+		// On Windows, hide the new console window
+		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+		// Do not wait for Discord; start it and continue
+		if err := cmd.Start(); err != nil {
+			log.Printf("failed to launch Discord (%s): %v", path, err)
+		} else {
+			// remember the started command so we can kill it on exit
+			discordCmd = cmd
+			log.Printf("launched Discord: %s %v (pid=%d)", path, args, cmd.Process.Pid)
+		}
 	}
 
 	// Ensure we disable the system proxy when the program exits or is interrupted.
 	defer func() {
-		if err := disable_proxy_with_regedit(); err != nil {
-			log.Printf("failed to disable proxy on exit: %v", err)
-		} else {
-			log.Println("system proxy disabled")
+		// Kill Discord process we started, if any
+		if discordCmd != nil && discordCmd.Process != nil {
+			if err := discordCmd.Process.Kill(); err != nil {
+				log.Printf("failed to kill Discord process (pid=%d): %v", discordCmd.Process.Pid, err)
+			} else {
+				// wait to reap the process
+				_, _ = discordCmd.Process.Wait()
+				log.Printf("killed Discord process (pid=%d)", discordCmd.Process.Pid)
+			}
 		}
+
 	}()
 
 	// Rewrite Spotify pause → play
