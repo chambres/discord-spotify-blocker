@@ -2,7 +2,7 @@
 
 A small Go utility that disables Discord from pausing your Spotify when in a voice channel.
 
-> ⚠️ **First run must be as Administrator.**  
+> ⚠️ **Must be run as Administrator.**  
 > This is required so the tool can generate + install certificates and make the initial file edits.
 
 ---
@@ -10,7 +10,7 @@ A small Go utility that disables Discord from pausing your Spotify when in a voi
 ## What It Does
 - Blocks Discord’s Spotify / Rich Presence functionality  
 - Installs a local cert (first run only)
-- Automatically enables and disables proxy on launch and exit.
+- Automatically launches Discord with proxy
 ---
 
 ## Build & Run
